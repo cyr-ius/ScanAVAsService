@@ -58,6 +58,25 @@ Le fichier scanné est téléchargeable sur le bucket "processed"
 - Scanner est un wrapper python qui effectue une boucle qui permet d'intercepter le message Kafka et de soumettre le fichier à ClamAV. Une fois terminée , cette boucle émet un résultat sur Kafka. Une boucle de nettoyage du bucket "quarantine" est réalisé.
 
 
+## Démonstrateur
+
+Lancer le docker compose
+Ouvrir le répertoire "demo" dans un terminal
+Installer venv via python3 -m venv .venv
+Basculer dans venv , . .venv/bin/activate
+Exécuter pip -r requirements.txt
+Lancer uploadFile.py
+
+Ce fichier envoie un fichier à scanner.
+
+```bash
+docker-compose up --build -d &&
+cd demo &&
+. .venv/bin/activate &&
+pip -r requirements.txt &&
+python3 uploadFile.py
+```
+
 ## Contribuer
 
 Nous accueillons les contributions ! Veuillez lire `CONTRIBUTING.md` pour plus de détails sur la façon de contribuer à ce projet.
