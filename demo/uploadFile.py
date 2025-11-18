@@ -11,8 +11,8 @@ MINIO_ACCESS = "minioadmin"
 MINIO_SECRET = "minioadmin"
 
 KAFKA_BOOTSTRAP = "192.168.1.1:9092"
-TOPIC_SCAN_REQUEST = "files_to_scan"
-TOPIC_SCAN_RESULT = "scan_results"
+INPUT_TOPIC = "files_to_scan"
+OUTPUT_TOPIC = "scan_results"
 
 FINAL_FILE = "demo/fichier_final.txt"
 
@@ -23,14 +23,14 @@ FILE = "demo/test_upload.txt"
 async def send_scan_request(producer, file_id, bucket, key):
     """Envoie un message de scan.request à Kafka."""
     msg = {"id": file_id, "bucket": bucket, "key": key}
-    await producer.send_and_wait(TOPIC_SCAN_REQUEST, json.dumps(msg).encode("utf-8"))
+    await producer.send_and_wait(INPUT_TOPIC, json.dumps(msg).encode("utf-8"))
     print(f"[INFO] Message envoyé à Kafka: {msg}")
 
 
-async def wait_for_result(file_id, timeout=20):
+async def wait_for_result(file_id, timeout=180):
     """Attend le résultat du scan pour le fichier donné."""
     consumer = AIOKafkaConsumer(
-        TOPIC_SCAN_RESULT,
+        OUTPUT_TOPIC,
         bootstrap_servers=KAFKA_BOOTSTRAP,
         enable_auto_commit=False,
         group_id=f"clamav-{uuid.uuid4()}",
@@ -41,14 +41,13 @@ async def wait_for_result(file_id, timeout=20):
     start = time.time()
     try:
         async for msg in consumer:
-            # msg = await consumer.getone()
             data = json.loads(msg.value.decode("utf-8"))
             if data.get("id") == file_id:
                 print(f"[INFO] Résultat reçu: {data}")
                 return data
 
-            # if time.time() - start > timeout:
-            #     raise TimeoutError("Aucun résultat reçu dans le délai imparti.")
+            if time.time() - start > timeout:
+                raise TimeoutError("Aucun résultat reçu dans le délai imparti.")
     finally:
         await consumer.stop()
 

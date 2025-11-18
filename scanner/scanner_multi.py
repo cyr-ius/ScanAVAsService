@@ -12,7 +12,7 @@ import json
 import os
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict
+from typing import Any
 
 import boto3
 import clamd
@@ -50,7 +50,7 @@ s3_client = boto3.client(
 # ---------------------------------------------------------
 #    S3 Scanning Worker (blocking, runs in threadpool)
 # ---------------------------------------------------------
-def scan_s3_object_blocking(bucket: str, key: str) -> Dict[str, Any]:
+def scan_s3_object_blocking(bucket: str, key: str) -> dict[str, Any]:
     """Reads an object from S3 and scans it with clamd.instream."""
     try:
         obj = s3_client.get_object(Bucket=bucket, Key=key)
@@ -243,6 +243,7 @@ async def main():
 
     # Retention task
     retention_task = asyncio.create_task(retention_loop("quarantine", executor))
+    processed_task = asyncio.create_task(retention_loop("processed", executor))
 
     print(
         f"Scanner multi-worker started: WORKER_POOL={WORKER_POOL} MAX_THREADS={MAX_THREADS}"
@@ -254,6 +255,7 @@ async def main():
         for w in workers:
             w.cancel()
         retention_task.cancel()
+        processed_task.cancel()
         await producer.stop()
         executor.shutdown(wait=True)
 
