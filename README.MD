@@ -22,10 +22,16 @@ docker-compose up --build -d
 ## Utilisation
 
 Une fois l'application lancée, vous pouvez déposer un fichier dans le bucket S3 nommé : files
+
 Emettre un message à Kafka pour réaliser le scan
+
     -> {"id":"xx","bucket":"files","key":"nom_du_fichier"}
+
+
 Résultat:
+
     -> {'id': 'xx', 'bucket': 'files', 'key': 'processed/nom_du_fichier', 'status': 'CLEAN', 'virus': None, 'details': '', 'timestamp': '2025-11-18T12:09:18.079338+00:00'}
+
 
 Le fichier scanné est téléchargeable sur le bucket "processed"
 
