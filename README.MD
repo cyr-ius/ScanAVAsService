@@ -21,7 +21,7 @@ docker-compose up --build -d
 
 ## Utilisation
 
-Une fois l'application lancée, vous pouvez déposer un fichier dans le bucket S3 nommé : files
+Une fois l'application lancée, vous pouvez déposer un fichier dans le bucket S3 nommé : scans
 
 Emettre un message à Kafka pour réaliser le scan
 

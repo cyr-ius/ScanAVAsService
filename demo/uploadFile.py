@@ -79,7 +79,7 @@ def download_from_minio(bucket, key, out_path):
 
 async def main():
     """Upload un fichier, demande son scan et attend le résultat."""
-    bucket = "files"
+    bucket = "scans"
     key = FILE
     file_id = str(uuid.uuid4())
 
