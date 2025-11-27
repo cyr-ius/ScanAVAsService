@@ -178,7 +178,7 @@ async def consume_loop(queue: asyncio.Queue):
         group_id="clamav-async-scanner-multi",
     )
     await consumer.start()
-
+    print("Kafka consumer started…")
     try:
         async for msg in consumer:
             try:
@@ -197,6 +197,7 @@ async def consume_loop(queue: asyncio.Queue):
 #   S3 Retention Cleanup
 # ---------------------------------------------------------
 def cleanup_s3_retention(bucket: str, days: int):
+    """Deletes objects older than specified days in the given S3 bucket."""
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
 
     resp = s3_client.list_objects_v2(Bucket=bucket)
@@ -214,9 +215,10 @@ def cleanup_s3_retention(bucket: str, days: int):
 
 
 async def retention_loop(bucket: str, executor: ThreadPoolExecutor):
+    """Periodically cleans up old objects in the specified S3 bucket."""
     while True:
         loop = asyncio.get_running_loop()
-        print("[retention] Running cleanup…")
+        print(f"[{bucket}] Running cleanup…")
         await loop.run_in_executor(
             executor, cleanup_s3_retention, bucket, RETENTION_DAYS
         )
