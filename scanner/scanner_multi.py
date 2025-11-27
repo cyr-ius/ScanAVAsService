@@ -1,13 +1,11 @@
 #!/usr/bin/env python3
 import asyncio
-import io
 import json
 import logging
 import os
 from datetime import datetime, timezone
 from typing import Any
 
-import clamd
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
 
 # --- Config ---
@@ -33,20 +31,15 @@ session = get_session()
 
 
 # ---------------------------------------------------------
-#   ClamAV client
-# ---------------------------------------------------------
-def get_clamav_client() -> clamd.ClamdNetworkSocket:
-    return clamd.ClamdNetworkSocket(host=CLAMD_HOST, port=CLAMD_PORT)
-
-
-# ---------------------------------------------------------
-#   Async S3 + ClamAV scan
+#   Async S3 + ClamAV scan via TCP socket
 # ---------------------------------------------------------
 async def scan_s3_object_async(bucket: str, key: str) -> dict[str, Any]:
     """
-    Streams an S3 object asynchronously and scans it with ClamAV using BytesIO.
+    Streams an S3 object asynchronously to ClamAV via TCP socket.
+    Uses the INSTREAM command directly.
     """
     try:
+        # Connect to S3
         async with session.create_client(
             "s3",
             endpoint_url=S3_ENDPOINT,
@@ -56,36 +49,40 @@ async def scan_s3_object_async(bucket: str, key: str) -> dict[str, Any]:
             resp = await client.get_object(Bucket=bucket, Key=key)
             body = resp["Body"]
 
-            chunks = []
+            reader, writer = await asyncio.open_connection(CLAMD_HOST, CLAMD_PORT)
+
+            # Send INSTREAM command
+            writer.write(b"zINSTREAM\0")  # zINSTREAM is the ClamAV protocol
+            await writer.drain()
+
+            # Stream chunks (up to 1 MB each)
             while True:
-                chunk = await body.read(1024 * 1024)  # 1 MB
+                chunk = await body.read(1024 * 1024)
                 if not chunk:
                     break
-                chunks.append(chunk)
+                size_bytes = len(chunk).to_bytes(4, byteorder="big")
+                writer.write(size_bytes + chunk)
+                await writer.drain()
 
-            buffer = io.BytesIO(b"".join(chunks))
-            clam = get_clamav_client()
-            result = clam.instream(buffer)
+            # Send zero-length chunk to indicate EOF
+            writer.write(b"\x00\x00\x00\x00")
+            await writer.drain()
 
-            if not result:
-                return {
-                    "status": "ERROR",
-                    "virus": None,
-                    "details": "No response from ClamAV",
-                }
+            # Read response
+            data = await reader.read(1024)
+            response = data.decode().strip()
 
-            if "stream" in result:
-                state, info = result["stream"]
-            else:
-                _, res = next(iter(result.items()))
-                state, info = res[0], res[1] if len(res) > 1 else None
+            writer.close()
+            await writer.wait_closed()
 
-            if state == "FOUND":
-                return {"status": "INFECTED", "virus": info}
-            elif state in ("OK", "SCAN_OK"):
+            # Parse ClamAV response
+            if "OK" in response:
                 return {"status": "CLEAN", "virus": None}
+            elif "FOUND" in response:
+                virus = response.split("FOUND")[0].strip()
+                return {"status": "INFECTED", "virus": virus}
             else:
-                return {"status": "ERROR", "virus": None, "details": str(result)}
+                return {"status": "ERROR", "virus": None, "details": response}
 
     except Exception as e:
         return {"status": "ERROR", "virus": None, "details": str(e)}
@@ -140,6 +137,7 @@ async def worker(name: int, queue: asyncio.Queue, producer: AIOKafkaProducer):
                 new_key = f"{S3_SCAN_QUARANTINE}/{key}"
 
             await move_s3_object_async(bucket, key, new_key)
+            finish = datetime.now(timezone.utc)
 
             # -------- SEND RESULT ----------
             result = {
@@ -149,8 +147,8 @@ async def worker(name: int, queue: asyncio.Queue, producer: AIOKafkaProducer):
                 "status": status,
                 "virus": scan.get("virus"),
                 "details": scan.get("details", ""),
+                "timestamp": finish.isoformat(),
                 "duration": str(finish - now),
-                "timestamp": datetime.now(timezone.utc).isoformat(),
             }
 
             await producer.send_and_wait(
