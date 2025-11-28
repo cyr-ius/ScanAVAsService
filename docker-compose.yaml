@@ -1,5 +1,14 @@
 ---
 services:
+  redis:
+    image: redis:7.0
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
   kafka:
     image: apache/kafka:4.1.1
     ports:
@@ -76,7 +85,7 @@ services:
 
   scanner:
     build:
-      context: ./scanner
+      context: .
     depends_on:
       - kafka
       - clamav
@@ -96,6 +105,8 @@ services:
       LOG_LEVEL: INFO
     tty: true
     stdin_open: true
+    ports:
+      - "8000:8000"
 
 volumes:
   minio_data:
