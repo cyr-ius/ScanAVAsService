@@ -1,30 +1,27 @@
+---
 services:
-  zookeeper:
-    image: confluentinc/cp-zookeeper:7.5.0
-    environment:
-      ZOOKEEPER_CLIENT_PORT: 2181
-      ZOOKEEPER_TICK_TIME: 2000
-    ports:
-      - "2181:2181"
-
   kafka:
-    image: confluentinc/cp-kafka:7.5.0
-    depends_on:
-      - zookeeper
+    image: apache/kafka:4.1.1
     ports:
       - "9092:9092"
     environment:
       KAFKA_BROKER_ID: 1
-      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT
-      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@localhost:9093
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
       KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://192.168.1.1:9092
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
       KAFKA_LOG_RETENTION_MS: 86400000
     healthcheck:
-      test: ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:9092 || exit 1"]
+      test:
+        [
+          "CMD-SHELL",
+          "kafka-broker-api-versions --bootstrap-server localhost:9092 || exit 1",
+        ]
       interval: 20s
       timeout: 10s
       retries: 6
@@ -51,11 +48,14 @@ services:
     volumes:
       - minio_data:/data
     healthcheck:
-      test: ["CMD-SHELL", "curl -sSf http://localhost:9000/minio/health/live >/dev/null || exit 1"]
+      test:
+        [
+          "CMD-SHELL",
+          "curl -sSf http://localhost:9000/minio/health/live >/dev/null || exit 1",
+        ]
       interval: 10s
       timeout: 5s
       retries: 6
-
 
   minio-init:
     image: minio/mc
@@ -77,16 +77,17 @@ services:
       - minio-init
     environment:
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
-      INPUT_TOPIC: files_to_scan
-      OUTPUT_TOPIC: scan_results
+      KAFKA_INPUT_TOPIC: files_to_scan
+      KAFKA_OUTPUT_TOPIC: scan_results
       S3_ENDPOINT_URL: http://minio:9000
       S3_ACCESS_KEY: minioadmin
       S3_SECRET_KEY: minioadmin
       S3_REGION: us-east-1
       CLAMD_HOST: clamav
       CLAMD_PORT: 3310
-      WORKER_POOL: "4"
-      MAX_THREADS: "8"
+      WORKER_POOL: 4
+      MAX_THREADS: 8
+      LOG_LEVEL: INFO
     tty: true
     stdin_open: true
 
