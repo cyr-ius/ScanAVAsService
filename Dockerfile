@@ -8,11 +8,12 @@ RUN apt-get update
 RUN apt-get install -y build-essential curl netcat-openbsd pkg-config libssl-dev ca-certificates
 RUN rm -rf /var/lib/apt/lists/*
 
-RUN pip install --no-cache-dir aiokafka boto3 clamd aiobotocore
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r /app/requirements.txt
 
-# copy scanner code and entrypoint
-COPY scanner_multi.py /app/scanner_multi.py
-COPY wait_and_start.sh /app/wait_and_start.sh
+COPY app/ .
 RUN chmod +x /app/wait_and_start.sh
+
+EXPOSE 8000
 
 CMD ["/app/wait_and_start.sh"]
