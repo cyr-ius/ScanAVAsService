@@ -4,9 +4,10 @@ Permet de réaliser des scan Antivirus des fichiers en mode service.
 Le moteur ClamAv sert l'antivirus.
 Le moteur Kafka permet d'émettre des messages pour procéder au scan et récupérer le résultat
 Le moteur Minio permet de téléversement vers un bucket S3 afin que ClamAv scanne le fichier
- Il est possiblle de récupérer le fichier scanné via le bucket "processed"
+Il est possiblle de récupérer le fichier scanné via le bucket "processed"
 
 ## Installation
+
 ```bash
 git clone http//github.com/cyr-ius/ScanAsService
 ```
@@ -27,14 +28,11 @@ Emettre un message à Kafka pour réaliser le scan
 
     -> {"id":"xx","bucket":"files","key":"nom_du_fichier"}
 
-
 Résultat:
 
     -> {'id': 'xx', 'bucket': 'files', 'key': 'processed/nom_du_fichier', 'status': 'CLEAN', 'virus': None, 'details': '', 'timestamp': '2025-11-18T12:09:18.079338+00:00'}
 
-
 Le fichier scanné est téléchargeable sur le bucket "processed"
-
 
 ## Structure du projet
 
@@ -49,14 +47,13 @@ Le fichier scanné est téléchargeable sur le bucket "processed"
 
 ## Dépendances
 
-- Kakfa , en écoute sur le port *0.0.0.0:9092*
+- Kakfa , en écoute sur le port _0.0.0.0:9092_
 
-- ClamAV , en écoute sur le port *0.0.0.0:3310*
+- ClamAV , en écoute sur le port _0.0.0.0:3310_
 
-- Minio , en écoute sur le port *0.0.0.0:9000
+- Minio , en écoute sur le port \*0.0.0.0:9000
 
 - Scanner est un wrapper python qui effectue une boucle qui permet d'intercepter le message Kafka et de soumettre le fichier à ClamAV. Une fois terminée , cette boucle émet un résultat sur Kafka. Une boucle de nettoyage du bucket "quarantine" est réalisé.
-
 
 ## Démonstrateur
 
