@@ -4,9 +4,9 @@ import json
 import logging
 import os
 import uuid
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
-import redis.asyncio as redis
 from aiobotocore.session import get_session
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
 from fastapi import FastAPI, HTTPException, UploadFile
@@ -15,32 +15,45 @@ from model import ScanResult
 from starlette.background import BackgroundTask
 
 # --- Config ---
-S3_ENDPOINT = os.getenv("S3_ENDPOINT_URL", "http://minio:9000")
-S3_ACCESS_KEY = os.getenv("S3_ACCESS_KEY", "minioadmin")
-S3_SECRET_KEY = os.getenv("S3_SECRET_KEY", "minioadmin")
-S3_BUCKET = os.getenv("S3_BUCKET", "scans")
-S3_SCAN_RESULT = os.getenv("S3_SCAN_RESULT", "processed")
-
 KAFKA_BOOTSTRAP = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "kafka:9092")
 KAFKA_INPUT_TOPIC = os.getenv("KAFKA_INPUT_TOPIC", "files_to_scan")
 KAFKA_OUTPUT_TOPIC = os.getenv("KAFKA_OUTPUT_TOPIC", "scan_results")
 
-REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379")
-LOCK_TIMEOUT = 15  # seconds
-
-LOGGER = logging.getLogger("api")
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
-logging.basicConfig(level=LOG_LEVEL)
 
-app = FastAPI()
-redis_client = redis.from_url(REDIS_URL)
+S3_ACCESS_KEY = os.getenv("S3_ACCESS_KEY", "minioadmin")
+S3_BUCKET = os.getenv("S3_BUCKET", "scans")
+S3_ENDPOINT = os.getenv("S3_ENDPOINT_URL", "http://minio:9000")
+S3_SCAN_RESULT = os.getenv("S3_SCAN_RESULT", "processed")
+S3_SECRET_KEY = os.getenv("S3_SECRET_KEY", "minioadmin")
+
+SEARCH_TIMEOUT = os.getenv("SEARCH_TIMEOUT", 5)  # seconds
+VERSION = os.getenv("APP_VERSION", "unknown")
+
 session = get_session()
 producer: AIOKafkaProducer = None
+logger = logging.getLogger("api")
+logging.basicConfig(level=LOG_LEVEL)
 
 
-# ---------------- Upload endpoint ----------------
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Initialize Kafka producer and Redis client."""
+    global producer
+    producer = AIOKafkaProducer(bootstrap_servers=KAFKA_BOOTSTRAP)
+    await producer.start()
+    logger.info("Kafka producer started")
+    yield
+    await producer.stop()
+    logger.info("Shutdown complete")
+
+
+app = FastAPI(title="ScanAV API", lifespan=lifespan, version=VERSION)
+
+
 @app.post("/upload")
-async def upload_file(file: UploadFile) -> ScanResult:
+async def upload_file_to_scan(file: UploadFile) -> ScanResult:
+    """Upload file to S3 and send scan request to Kafka."""
     unique_key = f"{uuid.uuid4()}_{file.filename}"
     data = await file.read()
 
@@ -70,9 +83,9 @@ async def upload_file(file: UploadFile) -> ScanResult:
     return payload
 
 
-# ---------------- Download scanned file ----------------
 @app.get("/download/{id}")
 async def download_scanned_file(id: str, force: bool = False):
+    """Download scanned file by ID if clean or force is True."""
     kafka_result = await fetch_scan_result(id)
     if kafka_result.status == "NO_FOUND":
         raise HTTPException(status_code=404, detail="File is not found")
@@ -112,31 +125,15 @@ async def download_scanned_file(id: str, force: bool = False):
         raise HTTPException(status_code=500, detail=f"Download error: {e}")
 
 
-# ---------------- Scan status endpoint ----------------
 @app.get("/result/{id}")
 async def scan_status(id: str) -> ScanResult:
+    """Fetch scan result by ID."""
     result = await fetch_scan_result(id)
     return result
 
 
-# ---------------- Startup / Shutdown ----------------
-@app.on_event("startup")
-async def startup_event():
-    global producer
-    producer = AIOKafkaProducer(bootstrap_servers=KAFKA_BOOTSTRAP)
-    await producer.start()
-    LOGGER.info("Kafka producer started")
-
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    await producer.stop()
-    await redis_client.close()
-    await redis_client.connection_pool.disconnect()
-    LOGGER.info("Shutdown complete")
-
-
-async def fetch_scan_result(record_id: str, timeout=5) -> ScanResult:
+async def fetch_scan_result(record_id: str, timeout=SEARCH_TIMEOUT) -> ScanResult:
+    """Fetch scan result from Kafka with timeout."""
     consumer = AIOKafkaConsumer(
         KAFKA_OUTPUT_TOPIC,
         bootstrap_servers=KAFKA_BOOTSTRAP,

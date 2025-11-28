@@ -16,4 +16,7 @@ RUN chmod +x /app/wait_and_start.sh
 
 EXPOSE 8000
 
+ARG VERSION=1.0.0
+ENV APP_VERSION=${VERSION}
+
 CMD ["/app/wait_and_start.sh"]
