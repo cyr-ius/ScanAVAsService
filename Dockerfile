@@ -9,10 +9,10 @@ RUN apt-get install -y build-essential curl netcat-openbsd pkg-config libssl-dev
 RUN rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r /app/requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app/ .
-RUN chmod +x /app/wait_and_start.sh
+RUN chmod +x wait_and_start.sh
 
 EXPOSE 8000
 
