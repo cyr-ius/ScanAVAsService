@@ -19,8 +19,8 @@ fi
 # S3 endpoint: prefer S3_ENDPOINT_URL (docker-compose), keep default if missing
 : "${S3_ENDPOINT_URL:=${S3_ENDPOINT_URL:-http://minio:9000}}"
 
-# Kafka: prefer KAFKA_SERVER (common name used in docker-compose), fallback to KAFKA_BOOTSTRAP_SERVERS
-: "${KAFKA_BOOTSTRAP_SERVERS:=${KAFKA_SERVER:-kafka:9092}}"
+# Kafka: prefer KAFKA_SERVERS (common name used in docker-compose)
+: "${KAFKA_SERVERS:=${KAFKA_SERVERS:-kafka:9092}}"
 
 # FASTAPI port and general timeout
 : "${FASTAPI_PORT:=${FASTAPI_PORT:-8000}}"
@@ -54,8 +54,8 @@ done
 echo "MinIO reachable (${MINIO_HOST})."
 
 # --- Wait for Kafka ---
-KAFKA_HOST=$(echo "${KAFKA_BOOTSTRAP_SERVERS}" | cut -d',' -f1 | cut -d':' -f1)
-KAFKA_PORT=$(echo "${KAFKA_BOOTSTRAP_SERVERS}" | cut -d',' -f1 | cut -d':' -f2)
+KAFKA_HOST=$(echo "${KAFKA_SERVERS}" | cut -d',' -f1 | cut -d':' -f1)
+KAFKA_PORT=$(echo "${KAFKA_SERVERS}" | cut -d',' -f1 | cut -d':' -f2)
 until nc -z "${KAFKA_HOST}" "${KAFKA_PORT}" >/dev/null 2>&1; do
   if (( SECONDS >= end )); then
     echo "Timeout waiting for Kafka (${KAFKA_HOST}:${KAFKA_PORT})"
@@ -85,4 +85,4 @@ echo "FastAPI ready."
 
 # --- Start scanner worker ---
 echo "Starting scanner worker..."
-exec python /app/scanner_multi.py
+exec python /app/runtime.py
