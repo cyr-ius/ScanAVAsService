@@ -47,7 +47,7 @@ async def s3_client_ctx():
         try:
             await client.__aexit__(None, None, None)
         except Exception as e:
-            logger.debug("[api] Error closing s3 client: %s", e)
+            logger.debug("Error closing s3 client: %s", e)
 
 
 @asynccontextmanager
@@ -56,10 +56,10 @@ async def lifespan(app: FastAPI):
     global producer
     producer = AIOKafkaProducer(bootstrap_servers=KAFKA_SERVERS, acks="all")  # type: ignore
     await producer.start()
-    logger.info("[api] Kafka producer started")
+    logger.info("Kafka producer started")
     yield
     await producer.stop()
-    logger.info("[api] Shutdown complete")
+    logger.info("Shutdown complete")
 
 
 app = FastAPI(
@@ -77,7 +77,7 @@ async def upload_file_to_scan(file: UploadFile) -> KafkaMessage:
         async with s3_client_ctx() as client:  # type: ignore
             await client.put_object(Bucket=S3_BUCKET, Key=unique_key, Body=data)  # type: ignore
     except Exception as e:
-        logger.error("[api] S3 put_object failed")
+        logger.exception("S3 put_object failed")
         raise HTTPException(status_code=503, detail=f"Storage unavailable: {e}")
 
     # Send Kafka message with retries
@@ -94,7 +94,7 @@ async def upload_file_to_scan(file: UploadFile) -> KafkaMessage:
             KAFKA_INPUT_TOPIC, value=payload.model_dump_json().encode("utf-8")
         )
     except Exception as e:
-        logger.error("[api] Kafka send failed (%s)", e)
+        logger.exception("Kafka send failed (%s)", e)
         raise HTTPException(status_code=503, detail=f"Message broker unavailable: {e}")
 
     return payload
@@ -128,7 +128,7 @@ async def download_scanned_file(id: str, force: bool = False) -> StreamingRespon
         )
 
     except Exception as e:
-        logger.error("[api] Download error (%s)", e)
+        logger.exception("Download error (%s)", e)
         raise HTTPException(
             status_code=404, detail="File not found or storage unavailable"
         )
@@ -149,7 +149,7 @@ async def scan_status(id: str) -> ScanResult:
     try:
         await consumer.start()
     except Exception as e:
-        logger.exception("[api] Kafka consumer start failed")
+        logger.exception("Kafka consumer start failed")
         raise HTTPException(status_code=503, detail=str(e))
 
     try:
