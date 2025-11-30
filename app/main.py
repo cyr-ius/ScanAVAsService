@@ -1,39 +1,34 @@
 # main.py
 import asyncio
 import json
-import os
 import uuid
 from contextlib import asynccontextmanager
 
 from aiobotocore.session import AioSession, get_session
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
+from const import (
+    KAFKA_INPUT_TOPIC,
+    KAFKA_OUTPUT_TOPIC,
+    KAFKA_SERVERS,
+    REDIS_URL,
+    S3_ACCESS_KEY,
+    S3_BUCKET,
+    S3_ENDPOINT,
+    S3_SECRET_KEY,
+    SEARCH_TIMEOUT,
+    VERSION,
+)
 from fastapi import FastAPI, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
-from helpers import KafkaMessage, ScanResult, retry_async, set_logger_level
+from helpers import KafkaMessage, ScanResult, retry_async
+from mylogging import mylogging
+from redis import asyncio as redis
 from starlette.background import BackgroundTask
 
-# --- Config ---
-KAFKA_SERVERS = os.getenv("KAFKA_SERVERS", "kafka:9092")
-KAFKA_INPUT_TOPIC = os.getenv("KAFKA_INPUT_TOPIC", "files_to_scan")
-KAFKA_OUTPUT_TOPIC = os.getenv("KAFKA_OUTPUT_TOPIC", "scan_results")
-
-LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
-LIB_LOG_LEVEL = os.getenv("LIB_LOG_LEVEL", "WARNING").upper()
-
-S3_ACCESS_KEY = os.getenv("S3_ACCESS_KEY", "minioadmin")
-S3_BUCKET = os.getenv("S3_BUCKET", "scans")
-S3_ENDPOINT = os.getenv("S3_ENDPOINT_URL", "http://minio:9000")
-S3_SCAN_RESULT = os.getenv("S3_SCAN_RESULT", "processed")
-S3_SECRET_KEY = os.getenv("S3_SECRET_KEY", "minioadmin")
-
-SEARCH_TIMEOUT = float(os.getenv("SEARCH_TIMEOUT", "5"))
-VERSION = os.getenv("APP_VERSION", "unknown")
-
+logger = mylogging.getLogger("api")
 session = get_session()
 producer: AIOKafkaProducer
-
-# --- Logging setup ---
-logger = set_logger_level("scanav", LOG_LEVEL, LIB_LOG_LEVEL)
+r = redis.from_url(REDIS_URL)
 
 
 # Create a reusable asynccontextmanager for S3 client to ensure proper close
@@ -52,19 +47,19 @@ async def s3_client_ctx():
         try:
             await client.__aexit__(None, None, None)
         except Exception as e:
-            logger.debug("Error closing s3 client: %s", e)
+            logger.debug("[api] Error closing s3 client: %s", e)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Initialize Kafka producer and Redis client."""
     global producer
-    producer = AIOKafkaProducer(bootstrap_servers=KAFKA_SERVERS, acks="all")
+    producer = AIOKafkaProducer(bootstrap_servers=KAFKA_SERVERS, acks="all")  # type: ignore
     await producer.start()
-    logger.info("Kafka producer started")
+    logger.info("[api] Kafka producer started")
     yield
     await producer.stop()
-    logger.info("Shutdown complete")
+    logger.info("[api] Shutdown complete")
 
 
 app = FastAPI(
@@ -79,10 +74,10 @@ async def upload_file_to_scan(file: UploadFile) -> KafkaMessage:
     data = await file.read()
 
     try:
-        async with s3_client_ctx() as client:
+        async with s3_client_ctx() as client:  # type: ignore
             await client.put_object(Bucket=S3_BUCKET, Key=unique_key, Body=data)  # type: ignore
     except Exception as e:
-        logger.error("S3 put_object failed")
+        logger.error("[api] S3 put_object failed")
         raise HTTPException(status_code=503, detail=f"Storage unavailable: {e}")
 
     # Send Kafka message with retries
@@ -99,7 +94,7 @@ async def upload_file_to_scan(file: UploadFile) -> KafkaMessage:
             KAFKA_INPUT_TOPIC, value=payload.model_dump_json().encode("utf-8")
         )
     except Exception as e:
-        logger.error("Kafka send failed (%s)", e)
+        logger.error("[api] Kafka send failed (%s)", e)
         raise HTTPException(status_code=503, detail=f"Message broker unavailable: {e}")
 
     return payload
@@ -108,7 +103,7 @@ async def upload_file_to_scan(file: UploadFile) -> KafkaMessage:
 @app.get("/download/{id}")
 async def download_scanned_file(id: str, force: bool = False) -> StreamingResponse:
     """Download scanned file by ID if clean or force is True."""
-    result = await fetch_scan_result(id)
+    result = await scan_status(id)
     if result.status == "PENDING":
         raise HTTPException(status_code=202, detail="File is pending scan")
     if result.status != "CLEAN" and not force:
@@ -133,7 +128,7 @@ async def download_scanned_file(id: str, force: bool = False) -> StreamingRespon
         )
 
     except Exception as e:
-        logger.error("Download error (%s)", e)
+        logger.error("[api] Download error (%s)", e)
         raise HTTPException(
             status_code=404, detail="File not found or storage unavailable"
         )
@@ -142,19 +137,9 @@ async def download_scanned_file(id: str, force: bool = False) -> StreamingRespon
 @app.get("/result/{id}")
 async def scan_status(id: str) -> ScanResult:
     """Fetch scan result by ID."""
-    try:
-        result = await fetch_scan_result(id)
-        return result
-    except Exception as e:
-        logger.error("Fetch scan result error (%s)", e)
-        raise HTTPException(status_code=503, detail=str(e))
-
-
-async def fetch_scan_result(record_id: str, timeout=SEARCH_TIMEOUT) -> ScanResult:
-    """Fetch scan result from Kafka with timeout."""
     consumer = AIOKafkaConsumer(
         KAFKA_OUTPUT_TOPIC,
-        bootstrap_servers=KAFKA_SERVERS,
+        bootstrap_servers=KAFKA_SERVERS,  # type: ignore
         auto_offset_reset="earliest",
         enable_auto_commit=True,
         group_id=f"api-tracker-{uuid.uuid4()}",
@@ -164,11 +149,11 @@ async def fetch_scan_result(record_id: str, timeout=SEARCH_TIMEOUT) -> ScanResul
     try:
         await consumer.start()
     except Exception as e:
-        logger.exception("Kafka consumer start failed")
+        logger.exception("[api] Kafka consumer start failed")
         raise HTTPException(status_code=503, detail=str(e))
 
     try:
-        deadline = asyncio.get_event_loop().time() + timeout
+        deadline = asyncio.get_event_loop().time() + SEARCH_TIMEOUT
 
         while True:
             remaining = deadline - asyncio.get_event_loop().time()
@@ -178,7 +163,7 @@ async def fetch_scan_result(record_id: str, timeout=SEARCH_TIMEOUT) -> ScanResul
             try:
                 batch = await consumer.getmany(timeout_ms=int(remaining * 1000))
             except Exception as e:
-                logger.warning("Error polling consumer, will retry: %s", e)
+                logger.warning("[api] Error polling consumer, will retry: %s", e)
                 await asyncio.sleep(0.5)
                 continue
 
@@ -187,10 +172,36 @@ async def fetch_scan_result(record_id: str, timeout=SEARCH_TIMEOUT) -> ScanResul
                     if msg.value is None:
                         continue
                     payload = json.loads(msg.value.decode())
-                    if payload.get("id") == record_id:
+                    if payload.get("id") == id:
                         return ScanResult(**payload)
 
         raise HTTPException(status_code=503, detail="Result not ready yet")
 
     finally:
         await consumer.stop()
+
+
+@app.get("/heartbeat", status_code=204)
+async def hearbeat():
+    """Hearbeat url."""
+    pass
+
+
+@app.get("/monitor")
+async def loadbalcenr_monitor():
+    """Monitor loadbalancing."""
+    keys = await r.keys("monitor")
+    mresult = []
+    for k in keys:
+        v = await r.get(k)
+        if v:
+            mresult.append(json.loads(v))
+
+    keys = await r.keys("clamav")
+    cresult = []
+    for k in keys:
+        v = await r.get(k)
+        if v:
+            cresult.append(json.loads(v))
+
+    return {"monitor": mresult, "clamav": cresult}
