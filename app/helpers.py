@@ -11,6 +11,41 @@ from pydantic import BaseModel
 logger = logging.getLogger(__name__)
 
 
+def set_logger_level(
+    name: str, log_level: str, lib_log_level: str = "WARNING"
+) -> logging.Logger:
+    """Set up logging configuration."""
+    formatter = logging.Formatter(
+        fmt="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+
+    # Handler console
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(formatter)
+
+    # Logger principal de ton application
+    logger = logging.getLogger(name)
+    logger.setLevel(log_level)
+    if not logger.hasHandlers():
+        logger.addHandler(console_handler)
+
+    for lib in ["uvicorn", "uvicorn.error", "uvicorn.access"]:
+        logger_ = logging.getLogger(lib)
+        logger_.handlers = []
+        logger_.propagate = False
+        logger_.setLevel(log_level)
+        logger_.addHandler(console_handler)
+
+    for lib in ["fastapi", "aiokafka", "aiobotocore", "redis"]:
+        liblog = logging.getLogger(lib)
+        liblog.setLevel(lib_log_level)
+        if not liblog.hasHandlers():
+            liblog.addHandler(console_handler)
+
+    return logger
+
+
 def parse_hosts(s: str, port: int = 3310) -> list[tuple[str, int]]:
     """Parse 'host:port,host:port' string from environment variable."""
     out = []

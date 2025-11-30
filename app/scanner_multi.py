@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 import asyncio
 import json
-import logging
 import os
 import time
 from datetime import datetime
@@ -18,11 +17,12 @@ from helpers import (
     S3UnlockException,
     ScanResult,
     parse_hosts,
+    set_logger_level,
 )
 from redis import asyncio as redis
 
 # ----------------- CONFIG -----------------
-KAFKA_SERVER = os.getenv("KAFKA_SERVER", "kafka:9092")
+KAFKA_SERVERS = os.getenv("KAFKA_SERVERS", "kafka:9092")
 KAFKA_INPUT_TOPIC = os.getenv("KAFKA_INPUT_TOPIC", "files_to_scan")
 KAFKA_OUTPUT_TOPIC = os.getenv("KAFKA_OUTPUT_TOPIC", "scan_results")
 
@@ -44,6 +44,7 @@ REDIS_LOCK_TIMEOUT = int(os.getenv("REDIS_LOCK_TIMEOUT", 15))
 WORKER_POOL = int(os.getenv("WORKER_POOL", 4))
 
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
+LIB_LOG_LEVEL = os.getenv("LIB_LOG_LEVEL", "WARNING").upper()
 
 # Hybrid scoring params (tweakable)
 BUSY_WEIGHT = float(os.getenv("BUSY_WEIGHT", 1.0))
@@ -55,8 +56,7 @@ EMA_ALPHA = float(
 )  # exponential moving average alpha for avg times
 
 session = get_session()
-logger = logging.getLogger(__name__)
-logging.basicConfig(level=LOG_LEVEL)
+logger = set_logger_level("scanav", LOG_LEVEL, LIB_LOG_LEVEL)
 
 # ----------------- GLOBAL STATE FOR ADAPTIVE LB -----------------
 # Stats per host key "host:port"
@@ -435,7 +435,7 @@ async def worker(
 async def consume_loop(queue: asyncio.Queue):
     consumer = AIOKafkaConsumer(
         KAFKA_INPUT_TOPIC,
-        bootstrap_servers=KAFKA_SERVER,
+        bootstrap_servers=KAFKA_SERVERS,
         group_id="scanner-group",
         enable_auto_commit=True,
     )
@@ -476,7 +476,7 @@ async def reset_host_failures_periodically() -> None:
 async def main():
     global producer
     queue = asyncio.Queue(maxsize=WORKER_POOL * 2)
-    producer = AIOKafkaProducer(bootstrap_servers=KAFKA_SERVER)
+    producer = AIOKafkaProducer(bootstrap_servers=KAFKA_SERVERS)
     await producer.start()
 
     redis_client = redis.from_url(REDIS_URL)

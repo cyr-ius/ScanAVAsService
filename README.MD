@@ -18,7 +18,7 @@ Remarque : certaines valeurs sont spécifiques à l'image Kafka et à sa configu
 
 ### Service scanner (conteneur scanner)
 
-- KAFKA_SERVER
+- KAFKA_SERVERS
   - Description : adresse bootstrap du broker Kafka.
   - Exemple : kafka:9092
 - KAFKA_INPUT_TOPIC
@@ -66,6 +66,13 @@ Remarque : certaines valeurs sont spécifiques à l'image Kafka et à sa configu
 - WORKER_POOL
   - Description : nombre de workers concurrents dans le scanner.
   - Exemple : 4 (ou 8 selon docker-compose)
+
+- LOG_LEVEL
+  - Description: préciser le niveau de log.
+  - Exemple: INFO (ou WARNING, ERROR, DEBUG)
+- LIB_LOG_LEVEL
+  - Description: préciser le niveau de log pour les librairies tierces.
+  - Exemple: INFO (ou WARNING, ERROR, DEBUG)
 
 - BUSY_WEIGHT
   - Description : poids du nombre de tâches en cours dans l'algorithme d'équilibrage adaptatif.
@@ -190,7 +197,7 @@ Remarques :
    ```
 2. Exporter les variables d'environnement requises et lancer :
    ```bash
-   export KAFKA_SERVER=kafka:9092
+   export KAFKA_SERVERS=kafka:9092
    export CLAMD_HOSTS="clamav1:3310,clamav2:3310"
    # autres variables...
    python3 app/main.py

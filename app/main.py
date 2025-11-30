@@ -1,7 +1,6 @@
 # main.py
 import asyncio
 import json
-import logging
 import os
 import uuid
 from contextlib import asynccontextmanager
@@ -10,15 +9,16 @@ from aiobotocore.session import AioSession, get_session
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
 from fastapi import FastAPI, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
-from helpers import KafkaMessage, ScanResult, retry_async
+from helpers import KafkaMessage, ScanResult, retry_async, set_logger_level
 from starlette.background import BackgroundTask
 
 # --- Config ---
-KAFKA_SERVER = os.getenv("KAFKA_SERVER", "kafka:9092")
+KAFKA_SERVERS = os.getenv("KAFKA_SERVERS", "kafka:9092")
 KAFKA_INPUT_TOPIC = os.getenv("KAFKA_INPUT_TOPIC", "files_to_scan")
 KAFKA_OUTPUT_TOPIC = os.getenv("KAFKA_OUTPUT_TOPIC", "scan_results")
 
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
+LIB_LOG_LEVEL = os.getenv("LIB_LOG_LEVEL", "WARNING").upper()
 
 S3_ACCESS_KEY = os.getenv("S3_ACCESS_KEY", "minioadmin")
 S3_BUCKET = os.getenv("S3_BUCKET", "scans")
@@ -31,8 +31,9 @@ VERSION = os.getenv("APP_VERSION", "unknown")
 
 session = get_session()
 producer: AIOKafkaProducer
-logger = logging.getLogger(__name__)
-logging.basicConfig(level=LOG_LEVEL)
+
+# --- Logging setup ---
+logger = set_logger_level("scanav", LOG_LEVEL, LIB_LOG_LEVEL)
 
 
 # Create a reusable asynccontextmanager for S3 client to ensure proper close
@@ -58,7 +59,7 @@ async def s3_client_ctx():
 async def lifespan(app: FastAPI):
     """Initialize Kafka producer and Redis client."""
     global producer
-    producer = AIOKafkaProducer(bootstrap_servers=KAFKA_SERVER, acks="all")
+    producer = AIOKafkaProducer(bootstrap_servers=KAFKA_SERVERS, acks="all")
     await producer.start()
     logger.info("Kafka producer started")
     yield
@@ -153,7 +154,7 @@ async def fetch_scan_result(record_id: str, timeout=SEARCH_TIMEOUT) -> ScanResul
     """Fetch scan result from Kafka with timeout."""
     consumer = AIOKafkaConsumer(
         KAFKA_OUTPUT_TOPIC,
-        bootstrap_servers=KAFKA_SERVER,
+        bootstrap_servers=KAFKA_SERVERS,
         auto_offset_reset="earliest",
         enable_auto_commit=True,
         group_id=f"api-tracker-{uuid.uuid4()}",
@@ -187,9 +188,6 @@ async def fetch_scan_result(record_id: str, timeout=SEARCH_TIMEOUT) -> ScanResul
                         continue
                     payload = json.loads(msg.value.decode())
                     if payload.get("id") == record_id:
-                        logger.info(
-                            "Found scan result for ID %s (%s)", record_id, payload
-                        )
                         return ScanResult(**payload)
 
         raise HTTPException(status_code=503, detail="Result not ready yet")
